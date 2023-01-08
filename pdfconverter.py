@@ -28,7 +28,7 @@ parser.add_argument("folderName", help="The folder containing images to be conve
 parser.add_argument("start", help="Starting image number to be converted", type=int)
 parser.add_argument("end", help="Last image number to be converted", type=int)
 args = parser.parse_args()
-folderName = args.folderName
+folderName = (args.folderName).strip("/")
 start = args.start
 end = args.end
 
