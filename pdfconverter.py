@@ -36,8 +36,7 @@ print("Converting...")
 images = []
 for num in range(start, end+1):
     filepath = "{0}/{1}.jpg".format(folderName, num)
-    with open(filepath, "rb") as image:
-        images.append(image.read())
+    images.append(filepath)
 
 with open("{0}.pdf".format(folderName), "wb") as file:
     file.write(img2pdf.convert(images))
