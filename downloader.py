@@ -1,127 +1,70 @@
-import requests
-import argparse
-from queue import Queue
-import threading
+import json
+import aiohttp
 import os
-import errno
 import random
-
-header = """
-                              ,      \    /      ,
-                             / \     )\__/(     / \\
-                            /   \   (_\  /_)   /   \\
-    _______________________/_____\___\@  @/___/_____\\____________________
-   |                                 |\../|                              |
-   |                                  \VV/                               |
-   |   _______ _______  ______ _______  _____  _  _  _ _______ __   _    |
-   |   |  |  | |_____| |_____/ |       |     | |  |  | |______ | \  |    |
-   |   |  |  | |     | |    \_ |_____  |_____| |__|__| |______ |  \_|    |
-   |_____________________________________________________________________|
-     || ||               |    /\ /     \\\\     \ /\    |
-     || ||               |  /   V       ))     V   \  |
-     || ||               |/     `      //      '     \|
-     || ||               `             V              '
-    _||_||________________
-   |                      |
-   | FlipHTML5 Downloader |
-   |______________________|
-   """
-print(header)
-
-parser = argparse.ArgumentParser()
-parser.add_argument(
-    "bookID", help="The ID of the book. Example: \'ousx/stby\' for http://fliphtml5.com/ousx/stby")
-parser.add_argument("start", help="Starting page to download", type=int)
-parser.add_argument("end", help="Last page to download", type=int)
-parser.add_argument("-n", "--folderName",
-                    help="The folder name to save the pages. Defaults to bookID")
-parser.add_argument("threadNum",
-                    help="Number of threads to run. Defaults to 20", type=int)
-parser.add_argument("-s", "--skipExisting", action="store_true",
-                    help="Skip downloading existing file")
-
-args = parser.parse_args()
-
-start = args.start
-end = args.end
-bookID = args.bookID
-skipExisting = args.skipExisting
-threadNum = args.threadNum
-
-if args.folderName is not None:
-    folderName = args.folderName
-else:
-    folderName = bookID.replace("/", "-")
-
-printLock = threading.Lock()
+import asyncio
+import img2pdf
 
 
-def downloadImage(taskID):
-    filepath = "{0}/{1}.jpg".format(folderName, taskID)
-    with printLock:
-        print("[ ] {0} downloading page {1}".format(
-            threading.current_thread().name, taskID))
+start = 1  # Starting page to download
+end = 10  # Last page to download
+bookID = "cmeau/oswz"  # The ID of the book
+skipExisting = False  # Skip downloading existing file
 
-    # Create directory if does not exist
+folderName = bookID.replace("/", "-")
+
+
+async def downloadImage(session, taskID, index_no):
+    filepath = f"{folderName}/{index_no}.jpg"
+
     os.makedirs(folderName, exist_ok=True)
 
-    URL = "http://online.fliphtml5.com/{0}/files/large/{1}.jpg".format(
-        bookID, taskID)
-         
+    URL = f"http://online.fliphtml5.com/{bookID}/files/large/{taskID}"
+
     with open("useragents.txt", "r") as f:
         useragents = [line.rstrip("\n") for line in f]
 
     useragent = useragents[random.randrange(0, len(useragents))]
-    headers = {
-        'User-Agent':  useragent}
-
-    try:
-        r = requests.get(URL, headers=headers, timeout=1.000)
+    headers = {"User-Agent": useragent}
+    print(f"[+] Downloading {URL}")
+    async with session.get(URL, headers=headers) as r:
         with open(filepath, "wb") as f:
-            f.write(r.content)
-        with printLock:
-            print("[+] {0} downloaded page {1}".format(
-                threading.current_thread().name, taskID))
-
-    #Pass task to others so the downloading won't stop
-    except requests.exceptions.HTTPError as errh:
-        print("[-] {0} encountered HTTP error on page {1}. Skipped Task.".format(threading.current_thread().name, taskID))
-        q.put(taskID)
-    except requests.exceptions.ConnectionError as errc:
-        print("[-] {0} encountered Connection error on page {1}. Skipped Task.".format(threading.current_thread().name, taskID))
-        q.put(taskID)
-    except requests.exceptions.Timeout as errt:
-        print("[-] {0} encountered Timeout error on page {1}. Skipped Task.".format(threading.current_thread().name, taskID))
-        q.put(taskID)
-
-def threader():
-    while True:
-        taskID = q.get()
-        filepath = "{0}/{1}.jpg".format(folderName, taskID)
-
-        if skipExisting:
-            if not os.path.isfile(filepath):
-                downloadImage(taskID)
-            else:
-                with printLock:
-                    print("[ ] {0} skipped page {1}".format(threading.current_thread().name, taskID))
-        else:
-            downloadImage(taskID)
-        q.task_done()
+            f.write(await r.read())
 
 
-q = Queue()
+def convert_images_to_pdf(folderName, start, end):
+    print("Converting...")
+    images = []
+    for num in range(start, end):
+        filepath = f"{folderName}/{num}.jpg"
+        with open(filepath, "rb") as image:
+            images.append(image.read())
 
-# Create threads
-for x in range(threadNum):
-    t = threading.Thread(target=threader)
-    t.daemon = True
-    t.start()
+    with open(f"{folderName}.pdf", "wb") as file:
+        file.write(img2pdf.convert(images))
 
-# Put taskID to queue
-for taskID in range(start, end + 1):
-    q.put(taskID)
+    print("\rFinished.")
 
-q.join()
-print("[+] Finished. Press any key to exit")
-input()
+
+async def main():
+    tasks = []
+    async with aiohttp.ClientSession() as session:
+        url = f"https://online.fliphtml5.com/{bookID}/javascript/config.js"
+        async with session.get(url) as r:
+            data = await r.text()
+            data = data.replace("var htmlConfig = ", "")
+            data = data[:-1]
+            data = json.loads(data)
+            fliphtml5_pages = data["fliphtml5_pages"]
+            index_no = 0
+            for i in fliphtml5_pages:
+                for j in i["n"]:
+                    image_path = f"{folderName}/{j}.jpg"
+                    if not skipExisting or not os.path.exists(image_path):
+                        await downloadImage(session, j, index_no)
+                    index_no += 1
+            convert_images_to_pdf(folderName, 0, index_no)
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
