@@ -3,7 +3,6 @@ import argparse
 from queue import Queue
 import threading
 import os
-import errno
 import random
 
 header = """
@@ -65,9 +64,6 @@ def downloadImage(taskID):
     # Create directory if does not exist
     os.makedirs(folderName, exist_ok=True)
 
-    URL = "http://online.fliphtml5.com/{0}/files/large/{1}.jpg".format(
-        bookID, taskID)
-         
     with open("useragents.txt", "r") as f:
         useragents = [line.rstrip("\n") for line in f]
 
@@ -75,24 +71,26 @@ def downloadImage(taskID):
     headers = {
         'User-Agent':  useragent}
 
-    try:
-        r = requests.get(URL, headers=headers, timeout=1.000)
-        with open(filepath, "wb") as f:
-            f.write(r.content)
-        with printLock:
-            print("[+] {0} downloaded page {1}".format(
-                threading.current_thread().name, taskID))
+    for ext in ['jpg', 'webp',]:  # Önce webp'yi deniyoruz, sonra jpg'yi deneyeceğiz
+        URL = "http://online.fliphtml5.com/{0}/files/large/{1}.{2}".format(bookID, taskID, ext)
+        try:
+            r = requests.get(URL, headers=headers, timeout=1.000)
+            with open(filepath, "wb") as f:
+                f.write(r.content)
+            with printLock:
+                print("[+] {0} downloaded page {1}".format(
+                    threading.current_thread().name, taskID))
 
-    #Pass task to others so the downloading won't stop
-    except requests.exceptions.HTTPError as errh:
-        print("[-] {0} encountered HTTP error on page {1}. Skipped Task.".format(threading.current_thread().name, taskID))
-        q.put(taskID)
-    except requests.exceptions.ConnectionError as errc:
-        print("[-] {0} encountered Connection error on page {1}. Skipped Task.".format(threading.current_thread().name, taskID))
-        q.put(taskID)
-    except requests.exceptions.Timeout as errt:
-        print("[-] {0} encountered Timeout error on page {1}. Skipped Task.".format(threading.current_thread().name, taskID))
-        q.put(taskID)
+        #Pass task to others so the downloading won't stop
+        except requests.exceptions.HTTPError as errh:
+            print("[-] {0} encountered HTTP error on page {1} ({2}). Skipped Task.".format(threading.current_thread().name, taskID, ext))
+            q.put(taskID)
+        except requests.exceptions.ConnectionError as errc:
+            print("[-] {0} encountered Connection error on page {1} ({2}). Skipped Task.".format(threading.current_thread().name, taskID, ext))
+            q.put(taskID)
+        except requests.exceptions.Timeout as errt:
+            print("[-] {0} encountered Timeout error on page {1} ({2}). Skipped Task.".format(threading.current_thread().name, taskID, ext))
+            q.put(taskID)
 
 def threader():
     while True:
